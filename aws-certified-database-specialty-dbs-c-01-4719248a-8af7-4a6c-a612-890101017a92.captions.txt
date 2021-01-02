@@ -1,0 +1,235 @@
+Welcome back, cloud gurus. In this lesson,
+we're going to finally start jumping into multi-AZ.
+We've talked a bit about this in our overview lesson,
+but here we're going to take some looks at basic multi-AZ architectures and
+discuss how this feature can be leveraged.
+Here we've got a similar architecture to my last read replica example,
+where our users interact with our application,
+and in turn our application interacts with our database to read and write data.
+As you can see here, our database is in an availability zone by itself,
+and doesn't currently have multi-AZ enabled. In a single-AZ setup,
+we run the risk of having a production outage,
+if our database were to undergo a failure. For instance,
+what if the underlying instance began failing health checks,
+and required a host replacement? If that were the case,
+our application would be down for the duration of the underlying instance
+replacement, which could be several minutes.
+We've talked about how multi-AZ creates a copy of your primary instance in a
+second availability zone, but we haven't talked much about how that process
+works. When we enable multi-AZ for our database instance,
+which we can do from the AWS console,
+the CLI or through the API,
+AWS will immediately begin taking a current snapshot of our primary instance.
+Keep in mind that while this happens,
+while we're converting from a single-AZ instance, into a multi-AZ instance,
+there could be a slight performance impact, such as higher latency.
+After the snapshot completes,
+RDS migrates the snapshot to the secondary availability zone,
+restores the snapshot to a database instance,
+then configures replication between the primary where the snapshot was taken,
+and the new multi-AZ standby.
+The replication layer operates between the underlying EBS volumes,
+and the database application itself.
+And unlike asynchronous read replica replication, like we just discussed,
+this replication is done synchronously.
+And by that I just mean that all changes that are made on the primary instance,
+are also made on the multi-AZ standby,
+before the primary considers an operation complete.
+So this is a big difference between asynchronous changes,
+where changes can happen independent of one another, versus synchronous,
+where changes are made at the same time.
+This synchronous replication is accomplished via physical replication at the
+storage layer, meaning it's relatively fast.
+And the bottlenecks that we discussed for logical replication don't really come
+into play. Keep in mind though,
+these multi-AZ instances can't serve read requests.
+They can't be leveraged like a read replica.
+So while they're designed to give us some availability, and durability,
+they don't give us scalability. So to be clear,
+no database engine is actually running on the multi-AZ standby instances.
+So while the underlying data might be there,
+there isn't an engine for you to interact with until it becomes a primary
+instance, which is why it's referred to as a standby. So,
+what happens if our primary instance here underwent a failure,
+or some sort of outage? Well, in that case,
+the standby is immediately promoted to the primary instance,
+without any action on our part. In fact,
+we don't even need to update the end point in our application,
+because that's handled as well.
+When the RDS service detects the primary instance health check failures,
+it immediately fires a workflow, to initiate a failover to the standby instance,
+or rather to promote the standby instance.
+But that doesn't address how our application, and well,
+the incoming connections, will be directed to the other instance.
+RDS utilizes DNS to accomplish this.
+And they also make sure that these DNS records have a low TTL,
+otherwise known as time to live.
+After the DNS record is updated to direct incoming connection attempts to the
+new primary,
+the application will start retrieving address information for the external end
+point. The DNS of your instance, in
+other words.
+And RDS ensures that that endpoint resolves to the new A record matching the new
+primary's assigned address. So, while the primary begins accepting connections,
+the RDS service will begin attempting to recover that new standby instance,
+and try to bring it to a point where it starts passing health checks.
+And that might just take a simple reboot,
+or it could take a full host replacement, or maybe it needs a new EBS volume,
+but the important thing to know is that all of these operations,
+they happen in the background with no user action required.
+It's all part of the multi-AZ functionality that comes with the managed service.
+So what's the total downtime of a single-AZ failover versus,
+a multi-AZ failover. Well, generally speaking,
+a single-AZ failover might take three to five minutes,
+compared to a multi-AZ failover,
+where our downtime is generally less than 60 seconds. In large,
+this is just due to the way that they immediately cycle out the old failed
+primary instance.
+Meaning we're not stuck waiting on the entire process of something like an
+underlying host replacement.
+We're already active on that new healthy host. In a single-AZ setup,
+we'd be stuck with blocked production while the managed service tries to recover
+the resource. Keep in mind that multi-AZ,
+isn't going to try to automatically recover in the event of poor performance on
+your primary instance.
+Meaning if you have issues with things like query latency,
+or memory consumption, or maybe you have disk queue depth,
+or excessive deadlocking,
+RDS isn't going to try to preemptively do anything to resolve that issue.
+The customer's responsible for those sorts of issues.
+And that's kind of where monitoring comes into play,
+and leveraging tools like performance insights, and CloudWatch metrics,
+and alarms.
+Multi-AZ is designed to help with failovers that are a result of a storage
+failure, such as an issue with the underlying EBS volume.
+In the event that the primary EBS volume were to fail,
+RDS would take a snapshot on the surviving volume,
+and then attach the new EBS volume that's created from that backup,
+to the instance that encountered the issue.
+Multi-AZ also fails over if there are network interruptions.
+This could mean a complete disconnection,
+or it could be just extremely high packet loss,
+assuming it results in a failed health check anyway.
+And also keep in mind multi-AZ will failover for any loss of availability,
+such as an actual hardware failure, or complete availability zone outages,
+those sort of things. Before we end this video,
+let's go ahead and jump into the AWS console,
+and walk through the process to take a single-AZ instance,
+and convert it to multi-AZ. While we'll have labs on this topic,
+I recommend following along in the cloud playground if you're unfamiliar with
+this process, or still uncomfortable with RDS console,
+if you're comfortable with the console maybe consider try using the CLI to
+enable multi-AZ,
+or maybe try launching a database engine with a multi-AZ configuration that you
+haven't done before.
+A lot of these engines have their own limitations and gotchas with multi-AZ.
+So it's important to reference the documentation at least once,
+so you have a lite idea of what those are. Okay,
+and here I've just gone ahead and navigated to the RDS dashboard,
+and I'm going to select a database from my available list.
+And if you don't have one,
+you can just go ahead and go through the creation process here.
+I hope you feel comfortable with that.
+And all I'm going to do here is turn this single-AZ,
+Postgres test DB into multi-AZ. We scroll to the right.
+We can see that multi-AZ is not enabled. Well to do this,
+all I'd need to do is navigate to modify,
+and perform an instance modification. Here,
+I can make changes such as the engine version, or the size,
+but this is actually the option I'm interested in.
+I want to convert this to a multi-AZ instance. To do so,
+all I have to do is click yes, and that's it. Now I scroll down.
+I'm not going to make any other changes here. At the bottom,
+I will click continue. And here's the important part. When you make changes,
+like changing something to multi-AZ,
+you're going to need to consider whether you want to apply the changes in the
+next scheduled maintenance window, or immediately.
+If I apply those changes in the next scheduled maintenance window,
+then the next time my instance goes through its scheduled maintenance window,
+the changes would be applied. At that point,
+my instance would go through the process to convert to multi-AZ.
+If I click apply immediately, the changes happen now. And since in my case,
+I want these to happen now, I'm just going to hit and click apply immediately.
+Now I'll click modify DB instance.
+And now I'll just give it one second before refreshing. Okay,
+and I've gone ahead, and done one refresh,
+and we can see that the instance status has changed to modifying,
+to let me know that there's something ongoing in this instance.
+If I actually wanted to see what was happening,
+say I'm not the one that had made this change,
+and I'm curious who is actually making the changes,
+or rather what change is being made is where I would see this, not who.
+I can click on the actual instance, and go to the logs and events category,
+and here I can see what's actually happening.
+We can see that in the last few minutes, the snapshot just completed.
+It took roughly four minutes.
+And now I'll just wait a few more minutes on the database dashboard here,
+for the multi-AZ column to start showing yes. And I suppose while we're waiting,
+one thing I could show you is the process to enable multi-AZ on a brand new
+instance. So say this instance wasn't preexisting,
+because both of the examples I've showed so far have been pre-existing
+instances. I'll navigate to create database.
+And from here, I'll just select my engine. I'll go ahead and select MySQL.
+And I'm going to select dev/tests. I personally don't use, uh,
+8.0 too much yet, so I'm just going to switch to 5.7. It's got JSON support. the
+database instance identifier doesn't matter much.
+I'm just going to name mine MAZ example. Here,
+I have my master username and password. And
+my instance size. I'll go ahead and select something like a t2.Medium.
+I have my storage configurations, which I'm not going to fiddle with.
+My storage auto-scaling. And here is my availability and durability settings,
+which have the option to enable multi-AZ.
+That is literally all you have to check to enable multi-AZ for an instance.
+It is that easy to have all these benefits. And from here,
+I'm not going to play with anything else. If I did want to, I could change, uh,
+things such as the initial database name, my parameter groups,
+whether or not I want to enable automated backups, my encryption settings,
+which key to use for KMS, but I'll just go ahead and,
+uh, watch this now. You
+can notice here that the database instance itself only costs $49.64.
+The storage is $4.60,
+but you can notice here that we have another charge of $49.64.
+It's because we have two of the exact same instance sizes.
+Therefore we have to pay for two of these instances.
+So it does double your costs,
+but you're also getting a lot of durability,
+and a lot of availability out of this. Next, I'll click create database.
+And here you can see that we have my maz example and multi-AZ is set to yes.
+This instance is still modifying and it will likely take quite a while. Okay.
+And I've gave it a few more minutes here and we can see that my maz example
+instance is still in the state of creating.
+But my postgres test db is actually in the status of configuring enhanced
+monitoring.
+But the important part is that you can see our multi-AZ column is now marked as
+yes. If you guys are wondering why my dashboard might look different than yours,
+all I've done is click the settings cog in the upper right,
+and modified which columns I actually want to see on my dashboard.
+And before we end this lesson, I had one more exam tip. Check out the docs.
+So when, when we first enable multi-AZ and I talked about this in this lesson,
+but it can result in a performance impact while the snapshot process actually
+completes. If you have a really write-heavy environment,
+then as those writes are coming in,
+it's having to apply all of those new transactions,
+to that backup to make sure it's up-to-date. So think about it like this.
+If I create a multi-AZ instance from my source, I initiate a snapshot.
+I restored that snapshot,
+but in the time that it's taken me to restore that snapshot to that standby
+instance,
+the primary has continued taking connections and writes from the application.
+That means that now my data isn't one-to-one.
+So when the multi-AZ standby comes up,
+all of those changes have to be played on standby. Well,
+if you have a really write-heavy environment,
+then all those changes are going to take longer because there will be more
+changes. It's important to keep things like that in mind.
+I would highly recommend checking out the blog posts called multi-AZ under the
+hood. I believe. I'll include that link in the resources
+section. Thank you for watching, cloud gurus. In this video,
+we've covered a light introduction into multi-AZ on RDS,
+and we've talked a bit about why it's important,
+what benefits it provides and how it can really be leveraged.
+We also took a quick look at the RDS dashboard,
+and went through the process to enable multi-AZ for a pre-existing instance,
+and we also covered the process to enable multi-AZ for a new instance during
+creation. That's it for this video, crowd gurus, when you're ready,
+please join me in the next one.
